@@ -113,6 +113,10 @@ void task_timer(void*args);
 
 void task_producer(void*args)
 {
+	const char consumer_msg[] = "Horas";
+	msg_t msg;
+	msg.id = supervisor_id;
+	msg.msg = consumer_msg;
 	task_args_t task_args = GET_ARGS(args,task_args_t);
 	alarm_t alarm;
 	alarm.hour = 1;
@@ -129,6 +133,7 @@ void task_producer(void*args)
 		{
 			xEventGroupSetBits(task_args.supervisor_signals, EVENT_PRODUCER);
 		}
+		xQueueSend(task_args.mailbox,&msg,portMAX_DELAY);
 		xSemaphoreGive(task_args.hours_semaphore);
 		vTaskDelay(pdMS_TO_TICKS(10000));
 	}
@@ -136,6 +141,10 @@ void task_producer(void*args)
 
 void task_consumer(void*args)
 {
+	const char producer_msg[] = "minutes";
+	msg_t msg;
+	msg.id = producer_id;
+	msg.msg = producer_msg;
 	TickType_t last_wake_time = xTaskGetTickCount();
 	task_args_t task_args = GET_ARGS(args,task_args_t);
 	alarm_t alarm;
@@ -158,6 +167,7 @@ void task_consumer(void*args)
 		{
 			xEventGroupSetBits(task_args.supervisor_signals, EVENT_PRODUCER);
 		}
+		xQueueSend(task_args.mailbox,&msg,portMAX_DELAY);
 		xSemaphoreGive(task_args.minutes_semaphore);
 		vTaskDelay(pdMS_TO_TICKS(5000));
 	}
@@ -168,6 +178,9 @@ void task_printer(void*args)
 {
 	task_args_t task_args = GET_ARGS(args,task_args_t);
 	msg_t received_msg;
+	uint8_t seconds = 0;
+	uint8_t minutes = 0;
+	uint8_t hours = 0;
 	for(;;)
 	{
 		xQueueReceive(task_args.mailbox,&received_msg,portMAX_DELAY);
@@ -176,19 +189,22 @@ void task_printer(void*args)
 		switch(received_msg.id)
 		{
 		case producer_id:
-			PRINTF("\rProducer sent:");
-			PRINTF(received_msg.msg);
-			PRINTF(" |DATA: %i\n",received_msg.data);
+			minutes += 1;
+			if (minutes == 60)
+			minutes=0;
+			PRINTF(" %i:%i:%i\n",hours,minutes,seconds);
 			break;
 		case consumer_id:
-			PRINTF("\rConsumer sent:");
-			PRINTF(received_msg.msg);
-			PRINTF(" |DATA: %i\n",received_msg.data);
+			seconds += 1;
+			if (seconds == 60)
+			seconds = 0;
+			PRINTF(" %i:%i:%i\n",hours,minutes,seconds);
 			break;
 		case supervisor_id:
-			PRINTF("\rSupervisor sent:");
-			PRINTF(received_msg.msg);
-			PRINTF(" |DATA: %i\n",received_msg.data);
+			hours += 1;
+			if (hours == 24)
+			hours = 0;
+			PRINTF(" %i:%i:%i\n",hours,minutes,seconds);
 			break;
 		default:
 			PRINTF("\rError\n");
@@ -202,6 +218,10 @@ void task_printer(void*args)
 void task_timer(void*args)
 {
 	uint32_t seconds  = 0;
+	const char consumer_msg[] = "Seconds";
+	msg_t msg;
+	msg.id = consumer_id;
+	msg.msg = consumer_msg;
 	TickType_t last_wake_time = xTaskGetTickCount();
 	task_args_t task_args = GET_ARGS(args,task_args_t);
 	alarm_t alarm;
@@ -224,7 +244,7 @@ void task_timer(void*args)
 		{
 			xEventGroupSetBits(task_args.supervisor_signals, EVENT_PRODUCER);
 		}
-		PRINTF("\rTime: %i seconds since reset\n",seconds);
+		xQueueSend(task_args.mailbox,&msg,portMAX_DELAY);
 		vTaskDelayUntil(&last_wake_time, pdMS_TO_TICKS(1000));
 	}
 }

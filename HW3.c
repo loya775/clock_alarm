@@ -59,16 +59,16 @@
 #else
 #define PRODUCER_PRIORITY 		(configMAX_PRIORITIES-4)
 #define CONSUMER_PRIORITY 		(configMAX_PRIORITIES-3)
-#define SUPERVISOR_PRIORITY 	(configMAX_PRIORITIES-2)
+#define SUPERVISOR_PRIORITY 	(configMAX_PRIORITIES-1)
 #define PRINTER_PRIORITY 		(configMAX_PRIORITIES-5)
 #define TIMER_PRIORITY 			(configMAX_PRIORITIES)
 #endif
 
 #define PRINTF_MIN_STACK (110)
 #define GET_ARGS(args,type) *((type*)args)
-#define EVENT_CONSUMER (1<<0)
-#define EVENT_PRODUCER (1<<1)
-
+#define EVENT_SEC (1<<0)
+#define EVENT_MIN (1<<1)
+#define EVENT_HOUR (1<<2)
 typedef struct
 {
 	int8_t shared_memory;
@@ -131,11 +131,14 @@ void task_producer(void*args)
 		}
 		if(hours == alarm.hour)
 		{
-			xEventGroupSetBits(task_args.supervisor_signals, EVENT_PRODUCER);
+			xEventGroupSetBits(task_args.supervisor_signals, EVENT_HOUR);
+		}else
+		{
+			xEventGroupClearBits(task_args.supervisor_signals, EVENT_HOUR);
 		}
 		xQueueSend(task_args.mailbox,&msg,portMAX_DELAY);
 		xSemaphoreGive(task_args.hours_semaphore);
-		vTaskDelay(pdMS_TO_TICKS(10000));
+		vTaskDelay(pdMS_TO_TICKS(3600000));
 	}
 }
 
@@ -158,18 +161,36 @@ void task_consumer(void*args)
 		}
 		xSemaphoreTake(task_args.minutes_semaphore,portMAX_DELAY);
 		minute++;
-		if(minute == 2)
+		if(minute == 60)
 		{
 			minute = 0;
 			xSemaphoreGive(task_args.hours_semaphore);
 		}
 		if(minute == alarm.minute)
 		{
-			xEventGroupSetBits(task_args.supervisor_signals, EVENT_PRODUCER);
+			xEventGroupSetBits(task_args.supervisor_signals, EVENT_MIN);
+		}else
+		{
+			xEventGroupClearBits(task_args.supervisor_signals, EVENT_MIN);
 		}
 		xQueueSend(task_args.mailbox,&msg,portMAX_DELAY);
 		xSemaphoreGive(task_args.minutes_semaphore);
-		vTaskDelay(pdMS_TO_TICKS(5000));
+		vTaskDelay(pdMS_TO_TICKS(60000));
+	}
+}
+
+void task_supervisor(void*args)
+{
+	const char consumer_msg[] = "Supervisor task supervised successfully";
+	task_args_t task_args = GET_ARGS(args,task_args_t);
+	msg_t msg;
+	uint8_t supervise_count = 0;
+	msg.id = supervisor_id;
+	msg.msg = consumer_msg;
+	for(;;)
+	{
+		xEventGroupWaitBits(task_args.supervisor_signals, 0x07, pdTRUE, pdTRUE, portMAX_DELAY);
+		PRINTF("ALARMA");
 	}
 }
 
@@ -225,7 +246,7 @@ void task_timer(void*args)
 	TickType_t last_wake_time = xTaskGetTickCount();
 	task_args_t task_args = GET_ARGS(args,task_args_t);
 	alarm_t alarm;
-	alarm.second = 5;
+	alarm.second = 3;
 	uint8_t min;
 	min = alarm.minute;
 	for(;;)
@@ -235,14 +256,17 @@ void task_timer(void*args)
 			xSemaphoreTake(task_args.minutes_semaphore,portMAX_DELAY);
 		}
 		seconds++;
-		if(seconds == 5)
+		if(seconds == 60)
 		{
 			seconds=0;
 			xSemaphoreGive(task_args.minutes_semaphore);
 		}
 		if(seconds == alarm.second)
 		{
-			xEventGroupSetBits(task_args.supervisor_signals, EVENT_PRODUCER);
+			xEventGroupSetBits(task_args.supervisor_signals, EVENT_SEC);
+		}else
+		{
+			xEventGroupClearBits(task_args.supervisor_signals, EVENT_SEC);
 		}
 		xQueueSend(task_args.mailbox,&msg,portMAX_DELAY);
 		vTaskDelayUntil(&last_wake_time, pdMS_TO_TICKS(1000));
@@ -269,7 +293,7 @@ int main(void)
 
 	xTaskCreate(task_producer, "producer", PRINTF_MIN_STACK, (void*)&args, PRODUCER_PRIORITY, NULL);
 	xTaskCreate(task_consumer, "consumer", PRINTF_MIN_STACK, (void*)&args, CONSUMER_PRIORITY, NULL);
-	//xTaskCreate(task_supervisor, "supervisor", PRINTF_MIN_STACK, (void*)&args, SUPERVISOR_PRIORITY, NULL);
+	xTaskCreate(task_supervisor, "supervisor", PRINTF_MIN_STACK, (void*)&args, SUPERVISOR_PRIORITY, NULL);
 	xTaskCreate(task_printer, "printer", PRINTF_MIN_STACK, (void*)&args, PRINTER_PRIORITY, NULL);
 	xTaskCreate(task_timer, "timer", PRINTF_MIN_STACK, (void*)&args, TIMER_PRIORITY, NULL);
 	vTaskStartScheduler();
